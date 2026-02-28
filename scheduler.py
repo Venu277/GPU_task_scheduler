@@ -1,0 +1,68 @@
+import requests
+import numpy as np
+import time
+import streamlit as st
+
+COLAB_URL = "https://surmountable-lorri-unlocative.ngrok-free.dev"
+HEADERS = {"ngrok-skip-browser-warning": "true"}
+
+def run_locally(size):
+    A = np.random.rand(size, size)
+    B = np.random.rand(size, size)
+    start = time.time()
+    C = np.matmul(A, B)
+    return time.time() - start
+
+def run_on_cloud(size):
+    start = time.time()
+    response = requests.post(f"{COLAB_URL}/run_task", json={"matrix_size": size}, headers=HEADERS)
+    total_time = time.time() - start
+    data = response.json()
+    return total_time, data['gpu_time']
+
+def smart_scheduler(size):
+    ping_start = time.time()
+    requests.get(f"{COLAB_URL}/ping", headers=HEADERS)
+    latency = time.time() - ping_start
+    if size < 500 or latency > 3.0:
+        return "local", latency
+    else:
+        return "cloud", latency
+
+st.title("Smart GPU Task Scheduler")
+st.subheader("Intelligently routes compute tasks between CPU and Cloud GPU")
+st.markdown("---")
+
+size = st.slider("Matrix Size", 100, 3000, 1000, step=100)
+st.caption("Small tasks run locally. Large tasks are offloaded to Cloud GPU.")
+
+if st.button("Run Task"):
+    with st.spinner("Measuring latency and analyzing task..."):
+        decision, latency = smart_scheduler(size)
+
+    col0a, col0b = st.columns(2)
+    with col0a:
+        st.metric("Network Latency", f"{latency:.3f}s")
+    with col0b:
+        st.metric("Scheduler Decision", decision.upper())
+
+    st.markdown("---")
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.write("### Local CPU")
+        local_time = run_locally(size)
+        st.metric("Compute Time", f"{local_time:.4f}s")
+
+    with col2:
+        st.write("### Cloud GPU")
+        cloud_total, gpu_time = run_on_cloud(size)
+        st.metric("Total Time (with network)", f"{cloud_total:.4f}s")
+        st.metric("Pure GPU Compute Time", f"{gpu_time:.6f}s")
+
+    st.markdown("---")
+    if decision == "cloud":
+        speedup = local_time / gpu_time
+        st.success(f"GPU was {speedup:.1f}x faster on raw compute! Scheduler correctly chose CLOUD.")
+    else:
+        st.warning(f"Scheduler chose LOCAL — task too small or latency ({latency:.2f}s) too high to benefit from cloud GPU.")
